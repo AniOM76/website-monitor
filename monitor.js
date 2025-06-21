@@ -23,7 +23,7 @@ const config = {
     recipients: process.env.RECIPIENT_EMAILS?.split(',').map(email => email.trim()) || []
   },
   monitoring: {
-    schedule: process.env.CRON_SCHEDULE || '0 */4 * * *', // Every 4 hours by default
+    schedule: process.env.CRON_SCHEDULE || '0 */4 * * *', // Default with proper format
     timeout: parseInt(process.env.REQUEST_TIMEOUT || '10000') // 10 seconds
   }
 };
