@@ -22,6 +22,10 @@ const config = {
     pass: process.env.EMAIL_PASS,
     recipients: process.env.RECIPIENT_EMAILS?.split(',').map(email => email.trim()) || []
   },
+  slack: {
+    webhookUrl: process.env.SLACK_WEBHOOK_URL,
+    alertOnlyFailures: process.env.SLACK_FAILURES_ONLY === 'true' // Only send alerts for failures
+  },
   monitoring: {
     schedule: process.env.CRON_SCHEDULE || '0 */4 * * *',
     timeout: parseInt(process.env.REQUEST_TIMEOUT || '10000')
@@ -39,12 +43,14 @@ class WebsiteMonitor {
     try {
       const results = await this.runAllTests();
       this.logResults(results);
+      await this.sendSlackNotification(results);
       
       console.log(`✅ Monitoring cycle completed. Status: ${results.overallStatus}`);
       return results;
     } catch (error) {
       console.error('❌ Monitoring cycle failed:', error);
       this.logError(error);
+      await this.sendSlackErrorNotification(error);
       throw error;
     }
   }
@@ -288,6 +294,138 @@ class WebsiteMonitor {
         passed: true, // Don't fail monitoring if logout fails
         details: 'Logout attempted - session will timeout naturally'
       };
+    }
+  }
+
+  async sendSlackNotification(results) {
+    if (!config.slack.webhookUrl) {
+      console.log('Slack not configured, skipping notification');
+      return;
+    }
+
+    // If configured to only alert on failures, skip successful results
+    if (config.slack.alertOnlyFailures && results.overallStatus === 'PASS') {
+      console.log('All tests passed, skipping Slack notification (failures-only mode)');
+      return;
+    }
+
+    try {
+      const color = results.overallStatus === 'PASS' ? '#36a64f' : '#ff0000';
+      const emoji = results.overallStatus === 'PASS' ? '✅' : '🚨';
+      
+      const message = {
+        username: 'Website Monitor',
+        icon_emoji: ':computer:',
+        attachments: [{
+          color: color,
+          title: `${emoji} SnapNotes.ai Monitor - ${results.overallStatus}`,
+          text: `Website monitoring completed at ${new Date(results.timestamp).toLocaleString()}`,
+          fields: [
+            {
+              title: 'Website',
+              value: config.website.url,
+              short: true
+            },
+            {
+              title: 'Status',
+              value: results.overallStatus,
+              short: true
+            }
+          ],
+          footer: 'Website Monitor',
+          ts: Math.floor(new Date(results.timestamp).getTime() / 1000)
+        }]
+      };
+
+      // Add test results
+      const testResults = results.tests.map(test => {
+        const icon = test.passed ? '✅' : '❌';
+        let value = `${icon} ${test.passed ? 'PASS' : 'FAIL'}`;
+        
+        if (test.responseTime) {
+          value += ` (${test.responseTime})`;
+        }
+        
+        if (!test.passed && test.details) {
+          value += `\n${test.details}`;
+        }
+        
+        return {
+          title: test.test,
+          value: value,
+          short: true
+        };
+      });
+
+      message.attachments[0].fields.push(...testResults);
+
+      // Add failure details if any
+      if (results.overallStatus === 'FAIL') {
+        const failedTests = results.tests.filter(t => !t.passed);
+        if (failedTests.length > 0) {
+          message.attachments[0].text += `\n\n⚠️ ${failedTests.length} test(s) failed`;
+        }
+      }
+
+      const response = await fetch(config.slack.webhookUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(message)
+      });
+
+      if (response.ok) {
+        console.log('📱 Slack notification sent successfully');
+      } else {
+        console.error('Failed to send Slack notification:', response.status);
+      }
+    } catch (error) {
+      console.error('Error sending Slack notification:', error.message);
+    }
+  }
+
+  async sendSlackErrorNotification(error) {
+    if (!config.slack.webhookUrl) {
+      return;
+    }
+
+    try {
+      const message = {
+        username: 'Website Monitor',
+        icon_emoji: ':warning:',
+        attachments: [{
+          color: '#ff0000',
+          title: '🚨 Website Monitor System Error',
+          text: `The monitoring system encountered an error at ${new Date().toLocaleString()}`,
+          fields: [
+            {
+              title: 'Error',
+              value: error.message,
+              short: false
+            },
+            {
+              title: 'Website',
+              value: config.website.url || 'Unknown',
+              short: true
+            }
+          ],
+          footer: 'Website Monitor',
+          ts: Math.floor(Date.now() / 1000)
+        }]
+      };
+
+      await fetch(config.slack.webhookUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(message)
+      });
+
+      console.log('📱 Slack error notification sent');
+    } catch (slackError) {
+      console.error('Failed to send Slack error notification:', slackError.message);
     }
   }
 
