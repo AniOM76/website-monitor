@@ -23,7 +23,7 @@ const config = {
     recipients: process.env.RECIPIENT_EMAILS?.split(',').map(email => email.trim()) || []
   },
   monitoring: {
-    schedule: process.env.CRON_SCHEDULE || '0 */4 * * *', // Default with proper format
+    schedule: (process.env.CRON_SCHEDULE || '0 */4 * * *').replace(/['"\\]/g, ''), // Clean quotes and backslashes
     timeout: parseInt(process.env.REQUEST_TIMEOUT || '10000') // 10 seconds
   }
 };
@@ -73,6 +73,11 @@ class WebsiteMonitor {
         console.log('Testing authenticated access...');
         const authTest = await this.testAuthenticatedAccess(loginTest.sessionCookie);
         results.tests.push(authTest);
+        
+        // Test 4: Logout to clean up session
+        console.log('Cleaning up session...');
+        const logoutTest = await this.testLogout(loginTest.sessionCookie);
+        results.tests.push(logoutTest);
       } else {
         results.tests.push({
           test: 'Authenticated Access',
@@ -319,7 +324,32 @@ class WebsiteMonitor {
     console.log('==========================================\n');
   }
 
-  generateTextReport(results) {
+  async testLogout(sessionCookie) {
+    try {
+      const logoutUrl = `${config.website.url.replace('www.', 'app.')}/logout`; // Try common logout URL
+      
+      const response = await fetch(logoutUrl, {
+        method: 'POST', // or GET depending on the app
+        headers: {
+          'Cookie': sessionCookie,
+          'User-Agent': 'Website-Monitor/1.0'
+        }
+      });
+
+      return {
+        test: 'Session Cleanup',
+        passed: true, // Don't fail monitoring if logout fails
+        statusCode: response.status,
+        details: response.ok ? 'Session logged out successfully' : 'Logout attempted (session may timeout naturally)'
+      };
+    } catch (error) {
+      return {
+        test: 'Session Cleanup',
+        passed: true, // Don't fail monitoring if logout fails
+        details: 'Logout attempted - session will timeout naturally'
+      };
+    }
+  }
     const lines = [
       '=== Website Monitor Report ===',
       `Status: ${results.overallStatus}`,
@@ -395,8 +425,6 @@ class WebsiteMonitor {
 
   start() {
     console.log('🚀 Website Monitor starting up...');
-    console.log('🔧 Debug - Raw CRON_SCHEDULE:', JSON.stringify(process.env.CRON_SCHEDULE));
-    console.log('🔧 Debug - Raw WEBSITE_URL:', JSON.stringify(process.env.WEBSITE_URL));
     console.log(`📅 Schedule: ${config.monitoring.schedule}`);
     console.log(`🌐 Monitoring: ${config.website.url}`);
     console.log(`📧 Email recipients: ${config.email.recipients.length}`);
