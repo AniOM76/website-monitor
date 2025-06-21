@@ -395,6 +395,8 @@ class WebsiteMonitor {
 
   start() {
     console.log('🚀 Website Monitor starting up...');
+    console.log('🔧 Debug - Raw CRON_SCHEDULE:', JSON.stringify(process.env.CRON_SCHEDULE));
+    console.log('🔧 Debug - Raw WEBSITE_URL:', JSON.stringify(process.env.WEBSITE_URL));
     console.log(`📅 Schedule: ${config.monitoring.schedule}`);
     console.log(`🌐 Monitoring: ${config.website.url}`);
     console.log(`📧 Email recipients: ${config.email.recipients.length}`);
